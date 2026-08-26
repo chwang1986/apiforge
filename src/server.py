@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from src._internal import build_request_model, make_handler
 from src._version import __version__
+from src.errors import register_http_error_handlers, ToolError, ValidationError
 
 
 class ApiForge:
@@ -39,6 +40,7 @@ class ApiForge:
         self.version = version
         self.app: FastAPI = self._create_app()
         self._register_health_endpoint()
+        register_http_error_handlers(self.app)
 
     def _create_app(self) -> FastAPI:
         """Create and configure the FastAPI application."""
