@@ -103,3 +103,100 @@ def test_openapi_has_tool_descriptions(client: TestClient) -> None:
     echo_op = data["paths"]["/tools/echo"]["post"]
     assert echo_op["summary"] == "Echo"
     assert "Echo" in echo_op["description"]
+
+
+# --- Async tool ---
+
+def test_async_tool() -> None:
+    """Test that async tool functions work correctly."""
+    import asyncio
+
+    f = ApiForge(name="AsyncTest")
+
+    @f.tool
+    async def async_greet(name: str) -> str:
+        """Greet someone asynchronously."""
+        await asyncio.sleep(0)
+        return f"Hi, {name}!"
+
+    c = TestClient(f.app)
+    resp = c.post("/tools/async_greet", json={"name": "World"})
+    assert resp.status_code == 200
+    assert resp.json() == "Hi, World!"
+
+
+# --- Default params ---
+
+def test_default_param() -> None:
+    """Test that parameters with default values work."""
+    f = ApiForge(name="DefaultTest")
+
+    @f.tool
+    def shout(message: str, exclamation: str = "!") -> str:
+        """Shout a message with optional exclamation."""
+        return message + exclamation
+
+    c = TestClient(f.app)
+    # With default
+    resp = c.post("/tools/shout", json={"message": "Hello"})
+    assert resp.status_code == 200
+    assert resp.json() == "Hello!"
+
+    # With explicit value
+    resp = c.post("/tools/shout", json={"message": "Hello", "exclamation": "??"})
+    assert resp.status_code == 200
+    assert resp.json() == "Hello??"
+
+
+# --- Tool exception ---
+
+def test_tool_exception_returns_500() -> None:
+    """Test that exceptions in tool functions return 500."""
+    f = ApiForge(name="FailTest")
+
+    @f.tool
+    def always_fail() -> str:
+        """A tool that always raises."""
+        raise RuntimeError("boom")
+
+    c = TestClient(f.app, raise_server_exceptions=False)
+    resp = c.post("/tools/always_fail", json={})
+    assert resp.status_code == 500
+
+
+# --- Router module ---
+
+def test_router_register_tool(client: TestClient) -> None:
+    """Test register_tool from router module."""
+    from src.router import create_tool_router, register_tool
+
+    router = create_tool_router(prefix="/v2/tools", tags=["v2"])
+    client.app.include_router(router)
+
+    def multiply(a: float, b: float) -> float:
+        """Multiply two numbers."""
+        return a * b
+
+    register_tool(router, multiply)
+
+    resp = client.post("/v2/tools/multiply", json={"a": 6, "b": 7})
+    assert resp.status_code == 200
+    assert resp.json() == 42
+
+
+def test_router_custom_path(client: TestClient) -> None:
+    """Test register_tool with a custom path."""
+    from src.router import create_tool_router, register_tool
+
+    router = create_tool_router(prefix="/api")
+    client.app.include_router(router)
+
+    def ping() -> str:
+        """Return pong."""
+        return "pong"
+
+    register_tool(router, ping, path="/ping")
+
+    resp = client.post("/api/ping", json={})
+    assert resp.status_code == 200
+    assert resp.json() == "pong"

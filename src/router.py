@@ -6,11 +6,11 @@ Use this for advanced routing scenarios beyond the basic @forge.tool decorator.
 
 from __future__ import annotations
 
-import inspect
-from typing import Any, Callable, get_type_hints
+from typing import Any, Callable
 
 from fastapi import APIRouter
-from pydantic import BaseModel, create_model
+
+from src._internal import build_request_model, make_handler
 
 
 def create_tool_router(
@@ -29,25 +29,6 @@ def create_tool_router(
     return APIRouter(prefix=prefix, tags=tags or ["tools"])
 
 
-def _build_request_model(func: Callable) -> type[BaseModel]:
-    """Dynamically create a Pydantic model from function signature."""
-    hints = get_type_hints(func)
-    sig = inspect.signature(func)
-
-    fields: dict[str, Any] = {}
-    for param_name, param in sig.parameters.items():
-        if param_name in ("self", "cls"):
-            continue
-        field_type = hints.get(param_name, Any)
-        if param.default is inspect.Parameter.empty:
-            fields[param_name] = (field_type, ...)
-        else:
-            fields[param_name] = (field_type, param.default)
-
-    model_name = f"{func.__name__.capitalize()}Request"
-    return create_model(model_name, **fields)
-
-
 def register_tool(
     router: APIRouter,
     func: Callable,
@@ -58,6 +39,7 @@ def register_tool(
 
     Builds a Pydantic request model from the function's type hints,
     consistent with the @forge.tool decorator behavior.
+    Supports both sync and async tool functions.
 
     Args:
         router: The target APIRouter.
@@ -69,19 +51,9 @@ def register_tool(
         The original function (unmodified).
     """
     endpoint_path = path or f"/{func.__name__}"
-    doc = func.__doc__ or func.__name__
-    request_model = _build_request_model(func)
-
-    def _make_handler(model_cls: type[BaseModel], tool_func: Callable) -> Callable:
-        async def handler(payload: model_cls) -> Any:  # noqa: ANN001
-            return tool_func(**payload.model_dump())
-
-        handler.__name__ = func.__name__
-        handler.__doc__ = doc
-        handler.__annotations__ = {"payload": model_cls, "return": Any}
-        return handler
-
-    handler = _make_handler(request_model, func)
+    doc = (func.__doc__ or func.__name__).strip().split("\n")[0]
+    request_model = build_request_model(func)
+    handler = make_handler(request_model, func, func.__name__, doc)
 
     router.add_api_route(
         path=endpoint_path,

@@ -3,14 +3,15 @@
 Provides the ApiForge class for quickly creating and running API tool services.
 """
 
-import inspect
-from typing import Any, Callable, get_type_hints
+from __future__ import annotations
+
+from typing import Any, Callable
 
 import uvicorn
 from fastapi import FastAPI
-from pydantic import BaseModel, create_model
 
-from src import __version__
+from src._internal import build_request_model, make_handler
+from src._version import __version__
 
 
 class ApiForge:
@@ -63,35 +64,11 @@ class ApiForge:
                 "version": self.version,
             }
 
-    def _build_request_model(self, func: Callable) -> type[BaseModel]:
-        """Dynamically create a Pydantic model from function signature.
-
-        Args:
-            func: The tool function to inspect.
-
-        Returns:
-            A Pydantic BaseModel class with fields matching the function params.
-        """
-        hints = get_type_hints(func)
-        sig = inspect.signature(func)
-
-        fields: dict[str, Any] = {}
-        for param_name, param in sig.parameters.items():
-            if param_name in ("self", "cls"):
-                continue
-            field_type = hints.get(param_name, Any)
-            if param.default is inspect.Parameter.empty:
-                fields[param_name] = (field_type, ...)
-            else:
-                fields[param_name] = (field_type, param.default)
-
-        model_name = f"{func.__name__.capitalize()}Request"
-        return create_model(model_name, **fields)
-
     def tool(self, func: Callable) -> Callable:
         """Decorator to register a function as an API tool endpoint.
 
         Automatically builds a request schema from the function's type hints.
+        Supports both sync and async tool functions.
 
         Args:
             func: The tool function to register.
@@ -101,19 +78,9 @@ class ApiForge:
         """
         tool_name = func.__name__
         path = f"/tools/{tool_name}"
-        doc = func.__doc__ or tool_name
-        request_model = self._build_request_model(func)
-
-        def _make_handler(model_cls: type[BaseModel], tool_func: Callable) -> Callable:
-            async def handler(payload: model_cls) -> Any:  # noqa: ANN001
-                return tool_func(**payload.model_dump())
-
-            handler.__name__ = tool_name
-            handler.__doc__ = doc
-            handler.__annotations__ = {"payload": model_cls, "return": Any}
-            return handler
-
-        handler = _make_handler(request_model, func)
+        doc = (func.__doc__ or tool_name).strip().split("\n")[0]
+        request_model = build_request_model(func)
+        handler = make_handler(request_model, func, tool_name, doc)
 
         self.app.add_api_route(
             path=path,
