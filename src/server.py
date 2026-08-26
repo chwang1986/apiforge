@@ -34,10 +34,12 @@ class ApiForge:
         name: str = "ApiForge",
         description: str = "API tool service",
         version: str = __version__,
+        envelope: bool = False,
     ) -> None:
         self.name = name
         self.description = description
         self.version = version
+        self.envelope = envelope
         self.app: FastAPI = self._create_app()
         self._register_health_endpoint()
         register_http_error_handlers(self.app)
@@ -82,7 +84,7 @@ class ApiForge:
         path = f"/tools/{tool_name}"
         doc = (func.__doc__ or tool_name).strip().split("\n")[0]
         request_model = build_request_model(func)
-        handler = make_handler(request_model, func, tool_name, doc)
+        handler = make_handler(request_model, func, tool_name, doc, envelope=self.envelope)
 
         self.app.add_api_route(
             path=path,
