@@ -25,7 +25,7 @@ def build_request_model(func: Callable) -> type[BaseModel]:
     Returns:
         A Pydantic BaseModel class with fields matching the function params.
     """
-    hints = get_type_hints(func)
+    hints = get_type_hints(func, include_extras=True)
     sig = inspect.signature(func)
 
     fields: dict[str, Any] = {}
