@@ -1,8 +1,9 @@
 """ApiForge middleware package.
 
-Planned middlewares:
-- Request logging
-- Rate limiting
-- API key authentication
-- CORS
+Available middlewares:
+- RequestLoggerMiddleware: request logging with timing
 """
+
+from src.middleware.logging import RequestLoggerMiddleware, enable_request_logging
+
+__all__ = ["RequestLoggerMiddleware", "enable_request_logging"]

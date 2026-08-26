@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from src._internal import build_request_model, make_handler
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
+from src.middleware.logging import enable_request_logging
 
 
 class ApiForge:
@@ -35,14 +36,18 @@ class ApiForge:
         description: str = "API tool service",
         version: str = __version__,
         envelope: bool = False,
+        log_requests: bool = False,
     ) -> None:
         self.name = name
         self.description = description
         self.version = version
         self.envelope = envelope
+        self.log_requests = log_requests
         self.app: FastAPI = self._create_app()
         self._register_health_endpoint()
         register_http_error_handlers(self.app)
+        if self.log_requests:
+            enable_request_logging(self.app)
 
     def _create_app(self) -> FastAPI:
         """Create and configure the FastAPI application."""
