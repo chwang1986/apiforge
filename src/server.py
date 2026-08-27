@@ -19,6 +19,7 @@ from src.middleware.cors import enable_cors
 from src.middleware.logging import enable_request_logging
 from src.middleware.rate_limit import enable_rate_limiting
 from src.middleware.request_id import enable_request_id
+from src.middleware.size_limit import enable_size_limit
 
 
 class ApiForge:
@@ -45,6 +46,7 @@ class ApiForge:
         cors_origins: list[str] | None = None,
         rate_limit: dict[str, int] | None = None,
         api_keys: dict[str, str] | None = None,
+        max_body_bytes: int | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -69,6 +71,8 @@ class ApiForge:
         if api_keys is not None:
             enable_api_key_auth(self.app, api_keys=api_keys)
         enable_request_id(self.app)
+        if max_body_bytes is not None:
+            enable_size_limit(self.app, max_bytes=max_body_bytes)
         install_health_checks(self.app, self.health_registry)
 
     def health_check(self, name: str) -> Callable:
