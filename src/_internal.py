@@ -84,8 +84,8 @@ def make_handler(
     return handler
 
 
-def _coerce_query_value(raw: str, field_type: Any) -> Any:
-    """Coerce a raw query string value to the target type."""
+def _coerce_value(raw: str, field_type: Any) -> Any:
+    """Coerce a raw string value to the target type (query or path)."""
     if field_type is int:
         return int(raw)
     if field_type is float:
@@ -95,6 +95,121 @@ def _coerce_query_value(raw: str, field_type: Any) -> Any:
     return raw
 
 
+def extract_path_params(path: str) -> list[str]:
+    """Extract parameter names from a path template.
+
+    e.g. "/tools/users/{user_id}/posts/{post_id}" → ["user_id", "post_id"]
+    """
+    import re
+    return re.findall(r"\{(\w+)\}", path)
+
+
+def build_body_model(func: Callable, path_params: list[str] | None = None) -> type[BaseModel]:
+    """Build a Pydantic model excluding path parameters.
+
+    Args:
+        func: The tool function.
+        path_params: Parameter names that are in the URL path (excluded from body).
+
+    Returns:
+        Pydantic model with only non-path fields.
+    """
+    hints = get_type_hints(func, include_extras=True)
+    sig = inspect.signature(func)
+    path_set = set(path_params or [])
+
+    fields: dict[str, Any] = {}
+    for param_name, param in sig.parameters.items():
+        if param_name in ("self", "cls") or param_name in path_set:
+            continue
+        field_type = hints.get(param_name, Any)
+        if param.default is inspect.Parameter.empty:
+            fields[param_name] = (field_type, ...)
+        else:
+            fields[param_name] = (field_type, param.default)
+
+    model_name = f"{func.__name__.capitalize()}Body"
+    return create_model(model_name, **fields)
+
+
+def make_path_handler(
+    model_cls: type[BaseModel],
+    tool_func: Callable,
+    tool_name: str,
+    doc: str,
+    path_params: list[str],
+    is_get: bool = False,
+    envelope: bool = False,
+) -> Callable:
+    """Create a handler that reads params from URL path + body/query.
+
+    Uses request.path_params (auto-populated by FastAPI from {param} in route).
+
+    Args:
+        model_cls: Pydantic model for non-path params (empty if all in path).
+        tool_func: The tool function.
+        tool_name: Tool name.
+        doc: Docstring.
+        path_params: Parameter names in the URL path.
+        is_get: If True, non-path params come from query string.
+        envelope: Wrap response in envelope.
+    """
+    fields = model_cls.model_fields if model_cls else {}
+
+    async def handler(request: Request) -> Any:
+        request_id = request.headers.get("X-Request-ID")
+        start = measure_start()
+        try:
+            kwargs: dict[str, Any] = {}
+
+            # 1) Path params (from request.path_params, auto-filled by FastAPI)
+            for p in path_params:
+                if p in request.path_params:
+                    raw = request.path_params[p]
+                    hints = get_type_hints(tool_func, include_extras=True)
+                    field_type = hints.get(p, str)
+                    kwargs[p] = _coerce_value(raw, field_type)
+
+            # 2) Body or query params
+            if is_get:
+                for field_name, field_info in fields.items():
+                    if field_name in request.query_params:
+                        kwargs[field_name] = _coerce_value(
+                            request.query_params[field_name], field_info.annotation
+                        )
+                    elif not field_info.is_required():
+                        kwargs[field_name] = field_info.default
+            else:
+                # POST: read JSON body
+                body = await request.json()
+                for field_name, field_info in fields.items():
+                    if field_name in body:
+                        kwargs[field_name] = body[field_name]
+                    elif not field_info.is_required():
+                        kwargs[field_name] = field_info.default
+
+            # 3) Call tool
+            result = tool_func(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+
+            if envelope:
+                return wrap_response(
+                    data=result, tool=tool_name,
+                    request_id=request_id, elapsed_ms=elapsed_ms(start),
+                )
+            return result
+
+        except Exception as exc:
+            status_code, error_body = handle_tool_exception(exc, tool_name, request_id)
+            return JSONResponse(status_code=status_code, content=error_body)
+
+    handler.__name__ = tool_name
+    handler.__doc__ = doc
+    handler.__annotations__ = {"request": Request, "return": Any}
+    return handler
+
+
 def make_get_handler(
     model_cls: type[BaseModel],
     tool_func: Callable,
@@ -102,32 +217,27 @@ def make_get_handler(
     doc: str,
     envelope: bool = False,
 ) -> Callable:
-    """Create a GET handler where parameters come from query string.
-
-    For GET requests, the model_cls fields are read from the query string
-    instead of a JSON body.
-    """
+    """Create a GET handler where parameters come from query string."""
     fields = model_cls.model_fields
 
-    async def handler(request: Request) -> Any:  # noqa: ANN001
+    async def handler(request: Request) -> Any:
         request_id = request.headers.get("X-Request-ID")
         start = measure_start()
         try:
             kwargs: dict[str, Any] = {}
             for field_name, field_info in fields.items():
                 if field_name in request.query_params:
-                    raw = request.query_params[field_name]
-                    kwargs[field_name] = _coerce_query_value(raw, field_info.annotation)
+                    kwargs[field_name] = _coerce_value(
+                        request.query_params[field_name], field_info.annotation
+                    )
                 elif not field_info.is_required():
                     kwargs[field_name] = field_info.default
 
-            # Check required fields that are missing
             missing = [
                 fn for fn, fi in fields.items()
                 if fi.is_required() and fn not in request.query_params
             ]
             if missing:
-                from src.errors import ERR_VALIDATION_FAILED
                 return JSONResponse(
                     status_code=422,
                     content={
@@ -145,10 +255,8 @@ def make_get_handler(
                 result = await result
             if envelope:
                 return wrap_response(
-                    data=result,
-                    tool=tool_name,
-                    request_id=request_id,
-                    elapsed_ms=elapsed_ms(start),
+                    data=result, tool=tool_name,
+                    request_id=request_id, elapsed_ms=elapsed_ms(start),
                 )
             return result
         except Exception as exc:

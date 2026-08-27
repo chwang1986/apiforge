@@ -10,7 +10,14 @@ from typing import Any, Callable
 import uvicorn
 from fastapi import FastAPI
 
-from src._internal import build_request_model, make_handler, make_get_handler
+from src._internal import (
+    build_body_model,
+    build_request_model,
+    extract_path_params,
+    make_get_handler,
+    make_handler,
+    make_path_handler,
+)
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
 from src.health import HealthRegistry, install_health_checks
@@ -121,20 +128,20 @@ class ApiForge:
                 "version": self.version,
             }
 
-    def tool(self, func: Callable | None = None, *, method: str = "POST") -> Callable:
+    def tool(
+        self,
+        func: Callable | None = None,
+        *,
+        method: str = "POST",
+        path: str | None = None,
+    ) -> Callable:
         """Decorator to register a function as an API tool endpoint.
-
-        Automatically builds a request schema from the function's type hints.
-        Supports both sync and async tool functions.
 
         Args:
             func: The tool function to register (or None for parameterized use).
             method: HTTP method ("POST" or "GET").
-                    POST: params from JSON body (default)
-                    GET: params from query string
-
-        Returns:
-            The original function (unmodified) or a decorator.
+            path: Custom URL path. Use {param} for path parameters.
+                  e.g. path="/tools/users/{user_id}"
 
         Usage:
             @forge.tool
@@ -142,20 +149,34 @@ class ApiForge:
 
             @forge.tool(method="GET")
             def search(query: str, limit: int = 10) -> list: ...
+
+            @forge.tool(method="GET", path="/tools/users/{user_id}")
+            def get_user(user_id: int) -> dict: ...
         """
         def register(f: Callable) -> Callable:
             tool_name = f.__name__
-            path = f"/tools/{tool_name}"
+            route_path = path or f"/tools/{tool_name}"
             doc = (f.__doc__ or tool_name).strip().split("\n")[0]
-            request_model = build_request_model(f)
+            path_params = extract_path_params(route_path)
 
-            if method.upper() == "GET":
+            if path_params:
+                # Path parameter tool
+                body_model = build_body_model(f, path_params=path_params)
+                handler = make_path_handler(
+                    body_model, f, tool_name, doc,
+                    path_params=path_params,
+                    is_get=(method.upper() == "GET"),
+                    envelope=self.envelope,
+                )
+            elif method.upper() == "GET":
+                request_model = build_request_model(f)
                 handler = make_get_handler(request_model, f, tool_name, doc, envelope=self.envelope)
             else:
+                request_model = build_request_model(f)
                 handler = make_handler(request_model, f, tool_name, doc, envelope=self.envelope)
 
             self.app.add_api_route(
-                path=path,
+                path=route_path,
                 endpoint=handler,
                 methods=[method.upper()],
                 name=tool_name,
