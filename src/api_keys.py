@@ -106,7 +106,8 @@ class KeyManager:
         """
         random_part = secrets.token_hex(length // 2)
         key = f"af_{name}_{random_part}"
-        key_id = key[:16]
+        # Use a hash-derived id so keys with the same name stay unique
+        key_id = self._hash(key)[:12]
         prefix = key[:16]
         expires_at = time.time() + (ttl_hours * 3600) if ttl_hours else 0.0
 
