@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from src._internal import build_request_model, make_handler
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
+from src.middleware.cors import enable_cors
 from src.middleware.logging import enable_request_logging
 
 
@@ -37,6 +38,7 @@ class ApiForge:
         version: str = __version__,
         envelope: bool = False,
         log_requests: bool = False,
+        cors_origins: list[str] | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -48,6 +50,8 @@ class ApiForge:
         register_http_error_handlers(self.app)
         if self.log_requests:
             enable_request_logging(self.app)
+        if cors_origins is not None:
+            enable_cors(self.app, origins=cors_origins)
 
     def _create_app(self) -> FastAPI:
         """Create and configure the FastAPI application."""
