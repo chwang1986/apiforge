@@ -15,6 +15,7 @@ from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
 from src.middleware.cors import enable_cors
 from src.middleware.logging import enable_request_logging
+from src.middleware.rate_limit import enable_rate_limiting
 
 
 class ApiForge:
@@ -39,12 +40,14 @@ class ApiForge:
         envelope: bool = False,
         log_requests: bool = False,
         cors_origins: list[str] | None = None,
+        rate_limit: dict[str, int] | None = None,
     ) -> None:
         self.name = name
         self.description = description
         self.version = version
         self.envelope = envelope
         self.log_requests = log_requests
+        self.rate_limit = rate_limit
         self.app: FastAPI = self._create_app()
         self._register_health_endpoint()
         register_http_error_handlers(self.app)
@@ -52,6 +55,12 @@ class ApiForge:
             enable_request_logging(self.app)
         if cors_origins is not None:
             enable_cors(self.app, origins=cors_origins)
+        if rate_limit is not None:
+            enable_rate_limiting(
+                self.app,
+                requests_per_window=rate_limit.get("requests", 100),
+                window_seconds=rate_limit.get("window_seconds", 60),
+            )
 
     def _create_app(self) -> FastAPI:
         """Create and configure the FastAPI application."""
