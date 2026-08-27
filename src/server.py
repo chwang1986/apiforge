@@ -18,6 +18,7 @@ from src.middleware.auth import enable_api_key_auth
 from src.middleware.cors import enable_cors
 from src.middleware.logging import enable_request_logging
 from src.middleware.rate_limit import enable_rate_limiting
+from src.middleware.compression import enable_compression
 from src.middleware.request_id import enable_request_id
 from src.middleware.size_limit import enable_size_limit
 
@@ -47,6 +48,7 @@ class ApiForge:
         rate_limit: dict[str, int] | None = None,
         api_keys: dict[str, str] | None = None,
         max_body_bytes: int | None = None,
+        compress: bool = False,
     ) -> None:
         self.name = name
         self.description = description
@@ -73,6 +75,8 @@ class ApiForge:
         enable_request_id(self.app)
         if max_body_bytes is not None:
             enable_size_limit(self.app, max_bytes=max_body_bytes)
+        if compress:
+            enable_compression(self.app)
         install_health_checks(self.app, self.health_registry)
 
     def health_check(self, name: str) -> Callable:
