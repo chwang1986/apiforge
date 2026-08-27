@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from src._internal import build_request_model, make_handler
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
+from src.middleware.auth import enable_api_key_auth
 from src.middleware.cors import enable_cors
 from src.middleware.logging import enable_request_logging
 from src.middleware.rate_limit import enable_rate_limiting
@@ -41,6 +42,7 @@ class ApiForge:
         log_requests: bool = False,
         cors_origins: list[str] | None = None,
         rate_limit: dict[str, int] | None = None,
+        api_keys: dict[str, str] | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -61,6 +63,8 @@ class ApiForge:
                 requests_per_window=rate_limit.get("requests", 100),
                 window_seconds=rate_limit.get("window_seconds", 60),
             )
+        if api_keys is not None:
+            enable_api_key_auth(self.app, api_keys=api_keys)
 
     def _create_app(self) -> FastAPI:
         """Create and configure the FastAPI application."""
