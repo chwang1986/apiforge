@@ -200,6 +200,30 @@ class ApiForge:
             return register(func)
         return register
 
+    def ws(self, func: Callable | None = None, *, path: str | None = None) -> Callable:
+        """Decorator to register a function as a WebSocket endpoint.
+
+        Args:
+            func: The WebSocket handler function (receives WebSocket as first arg).
+            path: Custom URL path. Default: /ws/{func_name}
+
+        Usage:
+            @forge.ws
+            async def chat(websocket: WebSocket):
+                await websocket.accept()
+                data = await websocket.receive_text()
+                await websocket.send_text(f"Echo: {data}")
+        """
+        def register(f: Callable) -> Callable:
+            tool_name = f.__name__
+            route_path = path or f"/ws/{tool_name}"
+            self.app.websocket(route_path)(f)
+            return f
+
+        if func is not None:
+            return register(func)
+        return register
+
     def run(
         self,
         host: str = "0.0.0.0",
