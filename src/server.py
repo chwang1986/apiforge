@@ -18,6 +18,7 @@ from src.middleware.auth import enable_api_key_auth
 from src.middleware.cors import enable_cors
 from src.middleware.logging import enable_request_logging
 from src.middleware.rate_limit import enable_rate_limiting
+from src.middleware.request_id import enable_request_id
 
 
 class ApiForge:
@@ -67,6 +68,7 @@ class ApiForge:
             )
         if api_keys is not None:
             enable_api_key_auth(self.app, api_keys=api_keys)
+        enable_request_id(self.app)
         install_health_checks(self.app, self.health_registry)
 
     def health_check(self, name: str) -> Callable:

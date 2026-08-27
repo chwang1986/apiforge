@@ -11,6 +11,7 @@ from src.middleware.auth import APIKeyAuthMiddleware, enable_api_key_auth, gener
 from src.middleware.cors import enable_cors
 from src.middleware.logging import RequestLoggerMiddleware, enable_request_logging
 from src.middleware.rate_limit import RateLimitMiddleware, enable_rate_limiting
+from src.middleware.request_id import RequestIDMiddleware, enable_request_id
 
 __all__ = [
     "RequestLoggerMiddleware",
@@ -21,4 +22,6 @@ __all__ = [
     "APIKeyAuthMiddleware",
     "enable_api_key_auth",
     "generate_api_key",
+    "RequestIDMiddleware",
+    "enable_request_id",
 ]
