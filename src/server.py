@@ -21,6 +21,7 @@ from src.middleware.rate_limit import enable_rate_limiting
 from src.middleware.compression import enable_compression
 from src.middleware.request_id import enable_request_id
 from src.middleware.size_limit import enable_size_limit
+from src.middleware.security import enable_security_headers
 
 
 class ApiForge:
@@ -49,6 +50,7 @@ class ApiForge:
         api_keys: dict[str, str] | None = None,
         max_body_bytes: int | None = None,
         compress: bool = False,
+        security_headers: bool = False,
     ) -> None:
         self.name = name
         self.description = description
@@ -77,6 +79,8 @@ class ApiForge:
             enable_size_limit(self.app, max_bytes=max_body_bytes)
         if compress:
             enable_compression(self.app)
+        if security_headers:
+            enable_security_headers(self.app)
         install_health_checks(self.app, self.health_registry)
 
     def health_check(self, name: str) -> Callable:
