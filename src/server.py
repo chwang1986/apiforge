@@ -137,6 +137,58 @@ class ApiForge:
                 "version": self.version,
             }
 
+    def _register_tool(
+        self,
+        f: Callable,
+        *,
+        method: str = "POST",
+        path: str,
+        extra_tags: list[str] | None = None,
+    ) -> None:
+        """Core tool registration logic (shared by tool() and Namespace).
+
+        Args:
+            f: The tool function.
+            method: HTTP method.
+            path: Full route path.
+            extra_tags: Additional OpenAPI tags to apply.
+        """
+        tool_name = f.__name__
+        doc = (f.__doc__ or tool_name).strip().split("\n")[0]
+        path_params = extract_path_params(path)
+        tags = list(extra_tags or [])
+        if "tools" not in tags:
+            tags = ["tools"] + tags
+
+        if is_upload_tool(f):
+            handler = f
+        elif is_streaming_tool(f):
+            request_model = build_request_model(f)
+            handler = make_streaming_handler(request_model, f, tool_name, doc)
+        elif path_params:
+            body_model = build_body_model(f, path_params=path_params)
+            handler = make_path_handler(
+                body_model, f, tool_name, doc,
+                path_params=path_params,
+                is_get=(method.upper() == "GET"),
+                envelope=self.envelope,
+            )
+        elif method.upper() == "GET":
+            request_model = build_request_model(f)
+            handler = make_get_handler(request_model, f, tool_name, doc, envelope=self.envelope)
+        else:
+            request_model = build_request_model(f)
+            handler = make_handler(request_model, f, tool_name, doc, envelope=self.envelope)
+
+        self.app.add_api_route(
+            path=path,
+            endpoint=handler,
+            methods=[method.upper()],
+            name=tool_name,
+            description=doc,
+            tags=tags,
+        )
+
     def tool(
         self,
         func: Callable | None = None,
@@ -165,45 +217,33 @@ class ApiForge:
         def register(f: Callable) -> Callable:
             tool_name = f.__name__
             route_path = path or f"/tools/{tool_name}"
-            doc = (f.__doc__ or tool_name).strip().split("\n")[0]
-            path_params = extract_path_params(route_path)
-
-            if is_upload_tool(f):
-                # File upload: register the function directly (FastAPI handles UploadFile)
-                handler = f
-            elif is_streaming_tool(f):
-                # Streaming (SSE) tool
-                request_model = build_request_model(f)
-                handler = make_streaming_handler(request_model, f, tool_name, doc)
-            elif path_params:
-                # Path parameter tool
-                body_model = build_body_model(f, path_params=path_params)
-                handler = make_path_handler(
-                    body_model, f, tool_name, doc,
-                    path_params=path_params,
-                    is_get=(method.upper() == "GET"),
-                    envelope=self.envelope,
-                )
-            elif method.upper() == "GET":
-                request_model = build_request_model(f)
-                handler = make_get_handler(request_model, f, tool_name, doc, envelope=self.envelope)
-            else:
-                request_model = build_request_model(f)
-                handler = make_handler(request_model, f, tool_name, doc, envelope=self.envelope)
-
-            self.app.add_api_route(
-                path=route_path,
-                endpoint=handler,
-                methods=[method.upper()],
-                name=tool_name,
-                description=doc,
-                tags=["tools"],
-            )
+            self._register_tool(f, method=method, path=route_path)
             return f
 
         if func is not None:
             return register(func)
         return register
+
+    def namespace(self, name: str):
+        """Create a Namespace for grouping tools under a URL prefix.
+
+        Args:
+            name: Namespace name (e.g. "users" → routes under /users/).
+
+        Returns:
+            A Namespace object with .tool() and .namespace() methods.
+
+        Usage:
+            users = forge.namespace("users")
+
+            @users.tool
+            def get(id: int) -> dict: ...
+            # POST /users/get
+        """
+        from src.namespace import Namespace
+        ns = Namespace(self.app, name, tag=None)
+        ns._forge = self
+        return ns
 
     def ws(self, func: Callable | None = None, *, path: str | None = None) -> Callable:
         """Decorator to register a function as a WebSocket endpoint.
