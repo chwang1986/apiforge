@@ -76,6 +76,7 @@ class ApiForge:
         self.log_requests = log_requests
         self.rate_limit = rate_limit
         self.app: FastAPI = self._create_app()
+        self._route_examples: dict[str, dict[str, Any]] = {}
         self._register_health_endpoint()
         register_http_error_handlers(self.app)
         self.health_registry = HealthRegistry()
@@ -145,6 +146,8 @@ class ApiForge:
         method: str = "POST",
         path: str,
         extra_tags: list[str] | None = None,
+        summary: str | None = None,
+        examples: dict[str, Any] | None = None,
     ) -> None:
         """Core tool registration logic (shared by tool() and Namespace).
 
@@ -153,6 +156,8 @@ class ApiForge:
             method: HTTP method.
             path: Full route path.
             extra_tags: Additional OpenAPI tags to apply.
+            summary: Short OpenAPI summary (defaults to first doc line).
+            examples: Dict of named examples for the OpenAPI spec.
         """
         tool_name = f.__name__
         doc = (f.__doc__ or tool_name).strip().split("\n")[0]
@@ -181,6 +186,13 @@ class ApiForge:
             request_model = build_request_model(f)
             handler = make_handler(request_model, f, tool_name, doc, envelope=self.envelope)
 
+        kwargs: dict[str, Any] = {}
+        if summary is not None:
+            kwargs["summary"] = summary
+        if examples is not None:
+            self._route_examples[path] = examples
+            kwargs["openapi_extra"] = {"requestBody": {"examples": examples}}
+
         self.app.add_api_route(
             path=path,
             endpoint=handler,
@@ -188,6 +200,7 @@ class ApiForge:
             name=tool_name,
             description=doc,
             tags=tags,
+            **kwargs,
         )
 
     def tool(
@@ -198,6 +211,8 @@ class ApiForge:
         path: str | None = None,
         before: Callable | None = None,
         after: Callable | None = None,
+        summary: str | None = None,
+        examples: dict[str, Any] | None = None,
     ) -> Callable:
         """Decorator to register a function as an API tool endpoint.
 
@@ -207,6 +222,8 @@ class ApiForge:
             path: Custom URL path. Use {param} for path parameters.
             before: Transform applied to kwargs before calling func.
             after: Transform applied to result after calling func.
+            summary: Short summary for OpenAPI spec.
+            examples: Named examples for OpenAPI request body.
 
         Usage:
             @forge.tool
@@ -214,13 +231,16 @@ class ApiForge:
 
             @forge.tool(before=my_before, after=my_after)
             def process(text: str) -> str: ...
+
+            @forge.tool(summary="Add two numbers", examples={"default": {"value": {"a": 1, "b": 2}}})
+            def add(a: int, b: int) -> int: ...
         """
         def register(f: Callable) -> Callable:
             tool_name = f.__name__
             route_path = path or f"/tools/{tool_name}"
             if before is not None or after is not None:
                 f = wrap_tool(f, before=before, after=after)
-            self._register_tool(f, method=method, path=route_path)
+            self._register_tool(f, method=method, path=route_path, summary=summary, examples=examples)
             return f
 
         if func is not None:
