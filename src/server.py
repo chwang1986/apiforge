@@ -22,6 +22,11 @@ from src._internal import (
     make_streaming_handler,
     make_upload_handler,
 )
+from src.pipeline import (
+    Pipeline,
+    build_pipeline_input_model,
+    make_pipeline_handler,
+)
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
 from src.health import HealthRegistry, install_health_checks
@@ -223,6 +228,55 @@ class ApiForge:
         if func is not None:
             return register(func)
         return register
+
+    def pipeline(
+        self,
+        steps: list[Callable],
+        *,
+        name: str,
+        input_type: type = Any,
+        path: str | None = None,
+    ) -> None:
+        """Register a tool pipeline endpoint.
+
+        A pipeline chains multiple functions; the output of each step
+        feeds the next.
+
+        Args:
+            steps: Ordered list of callables (sync or async), each: (value) -> value.
+            name: Endpoint name (used in /tools/{name} and error reports).
+            input_type: Type of the pipeline input (for request schema).
+            path: Custom route path. Default: /tools/{name}
+
+        Usage:
+            def clean(text: str) -> str:
+                return text.strip().lower()
+
+            def shout(text: str) -> str:
+                return text.upper() + "!"
+
+            forge.pipeline(steps=[clean, shout], name="transform", input_type=str)
+            # POST /tools/transform {"input": "  hi  "} → "HI!"
+        """
+        pipe = Pipeline(steps=steps, name=name)
+        input_model = build_pipeline_input_model([input_type])
+        handler = make_pipeline_handler(
+            pipe,
+            input_model,
+            input_key="input",
+            tool_name=name,
+            doc=f"Pipeline: {' -> '.join(s.__name__ for s in steps)}",
+            envelope=self.envelope,
+        )
+        route_path = path or f"/tools/{name}"
+        self.app.add_api_route(
+            path=route_path,
+            endpoint=handler,
+            methods=["POST"],
+            name=name,
+            description=f"Pipeline: {' -> '.join(s.__name__ for s in steps)}",
+            tags=["tools", "pipeline"],
+        )
 
     def run(
         self,
