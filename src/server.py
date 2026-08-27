@@ -29,6 +29,7 @@ from src.pipeline import (
 )
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
+from src.transform import wrap_tool
 from src.health import HealthRegistry, install_health_checks
 from src.middleware.auth import enable_api_key_auth
 from src.middleware.cors import enable_cors
@@ -195,6 +196,8 @@ class ApiForge:
         *,
         method: str = "POST",
         path: str | None = None,
+        before: Callable | None = None,
+        after: Callable | None = None,
     ) -> Callable:
         """Decorator to register a function as an API tool endpoint.
 
@@ -202,21 +205,21 @@ class ApiForge:
             func: The tool function to register (or None for parameterized use).
             method: HTTP method ("POST" or "GET").
             path: Custom URL path. Use {param} for path parameters.
-                  e.g. path="/tools/users/{user_id}"
+            before: Transform applied to kwargs before calling func.
+            after: Transform applied to result after calling func.
 
         Usage:
             @forge.tool
             def add(a: int, b: int) -> int: ...
 
-            @forge.tool(method="GET")
-            def search(query: str, limit: int = 10) -> list: ...
-
-            @forge.tool(method="GET", path="/tools/users/{user_id}")
-            def get_user(user_id: int) -> dict: ...
+            @forge.tool(before=my_before, after=my_after)
+            def process(text: str) -> str: ...
         """
         def register(f: Callable) -> Callable:
             tool_name = f.__name__
             route_path = path or f"/tools/{tool_name}"
+            if before is not None or after is not None:
+                f = wrap_tool(f, before=before, after=after)
             self._register_tool(f, method=method, path=route_path)
             return f
 
