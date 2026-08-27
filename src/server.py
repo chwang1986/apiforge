@@ -14,10 +14,12 @@ from src._internal import (
     build_body_model,
     build_request_model,
     extract_path_params,
+    is_streaming_tool,
     is_upload_tool,
     make_get_handler,
     make_handler,
     make_path_handler,
+    make_streaming_handler,
     make_upload_handler,
 )
 from src._version import __version__
@@ -164,6 +166,10 @@ class ApiForge:
             if is_upload_tool(f):
                 # File upload: register the function directly (FastAPI handles UploadFile)
                 handler = f
+            elif is_streaming_tool(f):
+                # Streaming (SSE) tool
+                request_model = build_request_model(f)
+                handler = make_streaming_handler(request_model, f, tool_name, doc)
             elif path_params:
                 # Path parameter tool
                 body_model = build_body_model(f, path_params=path_params)

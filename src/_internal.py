@@ -272,6 +272,68 @@ def is_upload_tool(func: Callable) -> bool:
     return False
 
 
+def is_streaming_tool(func: Callable) -> bool:
+    """Check if a function is an async generator (streaming/SSE tool)."""
+    return inspect.isasyncgenfunction(func)
+
+
+def make_streaming_handler(
+    model_cls: type[BaseModel],
+    tool_func: Callable,
+    tool_name: str,
+    doc: str,
+) -> Callable:
+    """Create a handler for streaming (SSE) tools.
+
+    The tool function is an async generator that yields strings.
+    Each yielded chunk is sent as an SSE data event.
+    """
+    from starlette.responses import StreamingResponse
+
+    async def handler(request: Request, payload: model_cls) -> Any:
+        request_id = request.headers.get("X-Request-ID")
+        try:
+            # Call the tool function to get the async generator
+            generator = tool_func(**payload.model_dump())
+            if not hasattr(generator, "__aiter__"):
+                # Not a generator, return as-is
+                if inspect.isawaitable(generator):
+                    result = await generator
+                return generator
+
+            async def event_stream():
+                async for chunk in generator:
+                    if isinstance(chunk, str):
+                        # Format as SSE event
+                        if not chunk.startswith("data:"):
+                            yield f"data: {chunk}\n\n"
+                        else:
+                            yield chunk + "\n"
+                    else:
+                        # JSON-encode non-string chunks
+                        import json as _json
+                        yield f"data: {_json.dumps(chunk, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Request-ID": request_id or "",
+                },
+            )
+        except Exception as exc:
+            status_code, error_body = handle_tool_exception(exc, tool_name, request_id)
+            return JSONResponse(status_code=status_code, content=error_body)
+
+    handler.__name__ = tool_name
+    handler.__doc__ = doc
+    handler.__annotations__ = {"request": Request, "payload": model_cls, "return": Any}
+    return handler
+
+
 def make_get_handler(
     model_cls: type[BaseModel],
     tool_func: Callable,
