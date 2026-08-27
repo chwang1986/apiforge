@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from src._internal import build_request_model, make_handler
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
+from src.health import HealthRegistry, install_health_checks
 from src.middleware.auth import enable_api_key_auth
 from src.middleware.cors import enable_cors
 from src.middleware.logging import enable_request_logging
@@ -53,6 +54,7 @@ class ApiForge:
         self.app: FastAPI = self._create_app()
         self._register_health_endpoint()
         register_http_error_handlers(self.app)
+        self.health_registry = HealthRegistry()
         if self.log_requests:
             enable_request_logging(self.app)
         if cors_origins is not None:
@@ -65,6 +67,21 @@ class ApiForge:
             )
         if api_keys is not None:
             enable_api_key_auth(self.app, api_keys=api_keys)
+        install_health_checks(self.app, self.health_registry)
+
+    def health_check(self, name: str) -> Callable:
+        """Decorator to register a dependency health check.
+
+        Usage:
+            forge = ApiForge(name="MyService")
+
+            @forge.health_check("database")
+            async def check_db():
+                await db.execute("SELECT 1")
+
+        Check results appear at GET /health/detail
+        """
+        return self.health_registry.check(name)
 
     def _create_app(self) -> FastAPI:
         """Create and configure the FastAPI application."""
