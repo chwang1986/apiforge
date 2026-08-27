@@ -10,7 +10,7 @@ from typing import Any, Callable
 import uvicorn
 from fastapi import FastAPI
 
-from src._internal import build_request_model, make_handler
+from src._internal import build_request_model, make_handler, make_get_handler
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
 from src.health import HealthRegistry, install_health_checks
@@ -121,33 +121,52 @@ class ApiForge:
                 "version": self.version,
             }
 
-    def tool(self, func: Callable) -> Callable:
+    def tool(self, func: Callable | None = None, *, method: str = "POST") -> Callable:
         """Decorator to register a function as an API tool endpoint.
 
         Automatically builds a request schema from the function's type hints.
         Supports both sync and async tool functions.
 
         Args:
-            func: The tool function to register.
+            func: The tool function to register (or None for parameterized use).
+            method: HTTP method ("POST" or "GET").
+                    POST: params from JSON body (default)
+                    GET: params from query string
 
         Returns:
-            The original function (unmodified).
-        """
-        tool_name = func.__name__
-        path = f"/tools/{tool_name}"
-        doc = (func.__doc__ or tool_name).strip().split("\n")[0]
-        request_model = build_request_model(func)
-        handler = make_handler(request_model, func, tool_name, doc, envelope=self.envelope)
+            The original function (unmodified) or a decorator.
 
-        self.app.add_api_route(
-            path=path,
-            endpoint=handler,
-            methods=["POST"],
-            name=tool_name,
-            description=doc,
-            tags=["tools"],
-        )
-        return func
+        Usage:
+            @forge.tool
+            def add(a: int, b: int) -> int: ...
+
+            @forge.tool(method="GET")
+            def search(query: str, limit: int = 10) -> list: ...
+        """
+        def register(f: Callable) -> Callable:
+            tool_name = f.__name__
+            path = f"/tools/{tool_name}"
+            doc = (f.__doc__ or tool_name).strip().split("\n")[0]
+            request_model = build_request_model(f)
+
+            if method.upper() == "GET":
+                handler = make_get_handler(request_model, f, tool_name, doc, envelope=self.envelope)
+            else:
+                handler = make_handler(request_model, f, tool_name, doc, envelope=self.envelope)
+
+            self.app.add_api_route(
+                path=path,
+                endpoint=handler,
+                methods=[method.upper()],
+                name=tool_name,
+                description=doc,
+                tags=["tools"],
+            )
+            return f
+
+        if func is not None:
+            return register(func)
+        return register
 
     def run(
         self,

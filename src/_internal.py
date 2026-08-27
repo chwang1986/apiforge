@@ -82,3 +82,79 @@ def make_handler(
     handler.__doc__ = doc
     handler.__annotations__ = {"request": Request, "payload": model_cls, "return": Any}
     return handler
+
+
+def _coerce_query_value(raw: str, field_type: Any) -> Any:
+    """Coerce a raw query string value to the target type."""
+    if field_type is int:
+        return int(raw)
+    if field_type is float:
+        return float(raw)
+    if field_type is bool:
+        return raw.lower() in ("1", "true", "yes", "on")
+    return raw
+
+
+def make_get_handler(
+    model_cls: type[BaseModel],
+    tool_func: Callable,
+    tool_name: str,
+    doc: str,
+    envelope: bool = False,
+) -> Callable:
+    """Create a GET handler where parameters come from query string.
+
+    For GET requests, the model_cls fields are read from the query string
+    instead of a JSON body.
+    """
+    fields = model_cls.model_fields
+
+    async def handler(request: Request) -> Any:  # noqa: ANN001
+        request_id = request.headers.get("X-Request-ID")
+        start = measure_start()
+        try:
+            kwargs: dict[str, Any] = {}
+            for field_name, field_info in fields.items():
+                if field_name in request.query_params:
+                    raw = request.query_params[field_name]
+                    kwargs[field_name] = _coerce_query_value(raw, field_info.annotation)
+                elif not field_info.is_required():
+                    kwargs[field_name] = field_info.default
+
+            # Check required fields that are missing
+            missing = [
+                fn for fn, fi in fields.items()
+                if fi.is_required() and fn not in request.query_params
+            ]
+            if missing:
+                from src.errors import ERR_VALIDATION_FAILED
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": {
+                            "code": "VALIDATION_FAILED",
+                            "message": f"Missing required query parameters: {', '.join(missing)}",
+                            "tool": tool_name,
+                            "request_id": request_id,
+                        }
+                    },
+                )
+
+            result = tool_func(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            if envelope:
+                return wrap_response(
+                    data=result,
+                    tool=tool_name,
+                    request_id=request_id,
+                    elapsed_ms=elapsed_ms(start),
+                )
+            return result
+        except Exception as exc:
+            status_code, error_body = handle_tool_exception(exc, tool_name, request_id)
+            return JSONResponse(status_code=status_code, content=error_body)
+
+    handler.__name__ = tool_name
+    handler.__doc__ = doc
+    return handler
