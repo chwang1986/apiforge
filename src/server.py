@@ -14,9 +14,11 @@ from src._internal import (
     build_body_model,
     build_request_model,
     extract_path_params,
+    is_upload_tool,
     make_get_handler,
     make_handler,
     make_path_handler,
+    make_upload_handler,
 )
 from src._version import __version__
 from src.errors import register_http_error_handlers, ToolError, ValidationError
@@ -159,7 +161,10 @@ class ApiForge:
             doc = (f.__doc__ or tool_name).strip().split("\n")[0]
             path_params = extract_path_params(route_path)
 
-            if path_params:
+            if is_upload_tool(f):
+                # File upload: register the function directly (FastAPI handles UploadFile)
+                handler = f
+            elif path_params:
                 # Path parameter tool
                 body_model = build_body_model(f, path_params=path_params)
                 handler = make_path_handler(

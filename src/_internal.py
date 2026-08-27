@@ -210,6 +210,68 @@ def make_path_handler(
     return handler
 
 
+def make_upload_handler(
+    tool_func: Callable,
+    tool_name: str,
+    doc: str,
+    envelope: bool = False,
+) -> Callable:
+    """Create a handler for file upload tools.
+
+    FastAPI natively injects UploadFile/Form/File params by type hint.
+    We just wrap with error handling and optional envelope.
+    """
+    # Build a wrapper that passes through all args (FastAPI injects them)
+    async def handler(request: Request, **kwargs: Any) -> Any:
+        request_id = request.headers.get("X-Request-ID")
+        start = measure_start()
+        try:
+            # For UploadFile fields, read the content
+            for key, val in list(kwargs.items()):
+                if hasattr(val, 'read'):
+                    content = await val.read()
+                    kwargs[key] = content
+            result = tool_func(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            if envelope:
+                return wrap_response(
+                    data=result, tool=tool_name,
+                    request_id=request_id, elapsed_ms=elapsed_ms(start),
+                )
+            return result
+        except Exception as exc:
+            status_code, error_body = handle_tool_exception(exc, tool_name, request_id)
+            return JSONResponse(status_code=status_code, content=error_body)
+
+    handler.__name__ = tool_name
+    handler.__doc__ = doc
+    return handler
+
+
+def is_upload_tool(func: Callable) -> bool:
+    """Check if a function has UploadFile or Form/File parameters."""
+    try:
+        from fastapi import File, Form, UploadFile
+        hints = get_type_hints(func, include_extras=True)
+        for hint in hints.values():
+            if hint in (UploadFile, File, Form) or (
+                hasattr(hint, '__origin__') and UploadFile in getattr(hint, '__args__', ())
+            ):
+                return True
+    except Exception:
+        pass
+    # Simple check: does any param annotation mention UploadFile?
+    try:
+        hints = get_type_hints(func, include_extras=True)
+        for hint in hints.values():
+            if 'UploadFile' in str(hint):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def make_get_handler(
     model_cls: type[BaseModel],
     tool_func: Callable,
