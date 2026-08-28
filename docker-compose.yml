@@ -1,0 +1,35 @@
+# ApiForge service orchestration
+#
+# Usage:
+#   docker compose up --build
+#   curl http://localhost:8000/health
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: apiforge-api
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - PORT=8000
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
