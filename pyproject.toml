@@ -2,11 +2,32 @@
 name = "apiforge"
 version = "0.1.0"
 description = "A lightweight micro-framework for exposing API tool services to external programs."
+readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "ApiForge Team", email = "team@apiforge.dev"},
+]
+keywords = ["api", "fastapi", "tools", "service", "framework"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/chwang1986/apiforge"
+Documentation = "https://github.com/chwang1986/apiforge#readme"
+Repository = "https://github.com/chwang1986/apiforge"
+Issues = "https://github.com/chwang1986/apiforge/issues"
 
 [project.optional-dependencies]
 dev = [
